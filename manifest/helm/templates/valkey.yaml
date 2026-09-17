@@ -1,0 +1,73 @@
+{{- if .Values.valkey.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "udrive.fullname" . }}-valkey
+  labels:
+    {{- include "udrive.labels" . | nindent 4 }}
+    app.kubernetes.io/component: valkey
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "udrive.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: valkey
+  template:
+    metadata:
+      labels:
+        {{- include "udrive.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: valkey
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: "node1"
+      containers:
+        - name: valkey
+          image: "{{ .Values.valkey.image.repository }}:{{ .Values.valkey.image.tag }}"
+          imagePullPolicy: {{ .Values.valkey.image.pullPolicy }}
+          command:
+            - valkey-server
+            - --protected-mode
+            - "no"
+            - --appendonly
+            - "no"
+            - --save
+            - ""
+            - --maxmemory
+            - {{ .Values.valkey.maxmemory | default "800mb" | quote }}
+            - --maxmemory-policy
+            - {{ .Values.valkey.maxmemoryPolicy | default "allkeys-lru" | quote }}
+          ports:
+            - name: valkey
+              containerPort: 6379
+              protocol: TCP
+          livenessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.valkey.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "udrive.fullname" . }}-valkey
+  labels:
+    {{- include "udrive.labels" . | nindent 4 }}
+    app.kubernetes.io/component: valkey
+spec:
+  type: ClusterIP
+  ports:
+    - port: 6379
+      targetPort: 6379
+      protocol: TCP
+      name: valkey
+  selector:
+    {{- include "udrive.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: valkey
+{{- end }}

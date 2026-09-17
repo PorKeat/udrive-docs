@@ -1,0 +1,25 @@
+# Standalone Service with Traefik Sticky Sessions
+# Guarantees that in-flight TUS chunks and web sessions stick to the exact same pod replica.
+apiVersion: v1
+kind: Service
+metadata:
+  name: udrive
+  namespace: udrive
+  annotations:
+    # Enable Traefik cookie-based sticky sessions
+    traefik.ingress.kubernetes.io/service.sticky.cookie: "true"
+    traefik.ingress.kubernetes.io/service.sticky.cookie.name: "udrive_sticky"
+    traefik.ingress.kubernetes.io/service.sticky.cookie.httponly: "true"
+    traefik.ingress.kubernetes.io/service.sticky.cookie.secure: "true"
+    traefik.ingress.kubernetes.io/service.sticky.cookie.samesite: "none"
+  labels:
+    app.kubernetes.io/name: udrive
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9200
+      targetPort: 9200
+      protocol: TCP
+      name: https
+  selector:
+    app.kubernetes.io/name: udrive

@@ -1,0 +1,92 @@
+{{- if .Values.nats.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "udrive.fullname" . }}-nats
+  labels:
+    {{- include "udrive.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nats
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "udrive.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: nats
+  template:
+    metadata:
+      labels:
+        {{- include "udrive.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: nats
+    spec:
+      serviceAccountName: {{ include "udrive.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      nodeSelector:
+        kubernetes.io/hostname: "node1"
+      containers:
+        - name: nats
+          image: "{{ .Values.image.repository }}:{{ .Values.nats.tag | default .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - "exec ocis nats server"
+          env:
+            - name: NATS_NATS_HOST
+              value: "0.0.0.0"
+            - name: NATS_NATS_PORT
+              value: "9233"
+            - name: NATS_NATS_STORE_DIR
+              value: "/var/tmp/ocis/nats"
+            - name: OCIS_LOG_LEVEL
+              value: {{ .Values.udrive.logLevel | default "info" | quote }}
+          ports:
+            - name: nats
+              containerPort: 9233
+              protocol: TCP
+          livenessProbe:
+            tcpSocket:
+              port: 9233
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: 9233
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          volumeMounts:
+            - name: nats-store
+              mountPath: /var/tmp/ocis/nats
+      volumes:
+        - name: nats-store
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "udrive.fullname" . }}-nats
+  labels:
+    {{- include "udrive.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nats
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9233
+      targetPort: 9233
+      protocol: TCP
+      name: nats
+  selector:
+    {{- include "udrive.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: nats
+{{- end }}

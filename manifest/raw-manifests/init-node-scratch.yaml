@@ -1,0 +1,44 @@
+# One-Shot DaemonSet to initialize /var/lib/udrive-uploads on all cluster nodes
+# Automatically creates the directory with UID/GID 1000:1000 and chmod 775.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: init-udrive-scratch
+  namespace: kube-system
+  labels:
+    app: init-udrive-scratch
+spec:
+  selector:
+    matchLabels:
+      app: init-udrive-scratch
+  template:
+    metadata:
+      labels:
+        app: init-udrive-scratch
+    spec:
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: init-scratch
+          image: docker.io/longhornio/longhorn-manager:v1.12.1
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Initializing local NVMe scratch storage..."
+              mkdir -p /host/var/lib/udrive-uploads
+              chown -R 1000:1000 /host/var/lib/udrive-uploads
+              chmod 775 /host/var/lib/udrive-uploads
+              ls -ld /host/var/lib/udrive-uploads
+              echo "Complete. Sleeping indefinitely."
+              sleep infinity
+          volumeMounts:
+            - name: host-root
+              mountPath: /host
+      volumes:
+        - name: host-root
+          hostPath:
+            path: /

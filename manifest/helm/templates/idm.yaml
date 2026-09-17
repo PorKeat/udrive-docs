@@ -1,0 +1,148 @@
+{{- if .Values.idm.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "udrive.fullname" . }}-idm
+  labels:
+    {{- include "udrive.labels" . | nindent 4 }}
+    app.kubernetes.io/component: idm
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "udrive.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: idm
+  template:
+    metadata:
+      labels:
+        {{- include "udrive.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: idm
+      {{- if .Values.vault.enabled }}
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: {{ .Values.vault.role | quote }}
+        {{- if or .Values.vault.caConfigMap .Values.vault.caCert }}
+        vault.hashicorp.com/agent-ca-config-map: {{ default (printf "%s-vault-ca" (include "udrive.fullname" .)) .Values.vault.caConfigMap | quote }}
+        vault.hashicorp.com/agent-ca-cert: "/vault/tls/vault-ca.crt"
+        {{- end }}
+        {{- if .Values.vault.tlsSkipVerify }}
+        vault.hashicorp.com/tls-skip-verify: "true"
+        {{- end }}
+        vault.hashicorp.com/agent-run-as-user: "1000"
+        vault.hashicorp.com/agent-run-as-group: "1000"
+        vault.hashicorp.com/agent-inject-secret-udrive: {{ .Values.vault.secretPath | quote }}
+        vault.hashicorp.com/agent-inject-template-udrive: |
+          {{`{{- with secret "`}}{{ .Values.vault.secretPath }}{{`" -}}`}}
+          export IDM_ADMIN_PASSWORD="{{`{{ .Data.data.admin_password }}`}}"
+          {{`{{- end -}}`}}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "udrive.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (default .Values.nodeSelector .Values.idm.nodeSelector) }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (default .Values.affinity .Values.idm.affinity) }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: idm
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.idm.tag | default .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              if [ -f /vault/secrets/udrive ]; then
+                . /vault/secrets/udrive
+              fi
+              exec ocis idm server
+          env:
+            - name: IDM_LDAPS_ADDR
+              value: "0.0.0.0:9235"
+            - name: OCIS_LOG_LEVEL
+              value: {{ .Values.udrive.logLevel | quote }}
+            - name: OCIS_INSECURE
+              value: {{ .Values.udrive.insecure | quote }}
+            - name: IDM_CREATE_DEMO_USERS
+              value: {{ .Values.udrive.demoUsers | quote }}
+            {{- if not .Values.vault.enabled }}
+            - name: IDM_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "udrive.secretName" . }}
+                  key: {{ .Values.udrive.admin.passwordKey }}
+            {{- end }}
+          ports:
+            - name: ldaps
+              containerPort: 9235
+              protocol: TCP
+          livenessProbe:
+            tcpSocket:
+              port: 9235
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: 9235
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: ocis-data
+              mountPath: /var/lib/ocis
+            - name: ocis-config
+              mountPath: /etc/ocis
+      volumes:
+        - name: ocis-data
+          {{- if .Values.persistence.data.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "udrive.fullname" . }}-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: ocis-config
+          {{- if .Values.persistence.config.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "udrive.fullname" . }}-config
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "udrive.fullname" . }}-idm
+  labels:
+    {{- include "udrive.labels" . | nindent 4 }}
+    app.kubernetes.io/component: idm
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9235
+      targetPort: 9235
+      protocol: TCP
+      name: ldaps
+  selector:
+    {{- include "udrive.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: idm
+{{- end }}

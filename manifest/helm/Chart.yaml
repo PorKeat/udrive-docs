@@ -1,0 +1,22 @@
+apiVersion: v2
+name: udrive
+description: Production Helm chart for UDrive Cloud Storage & Collaboration Platform
+type: application
+version: 0.3.26
+appVersion: "1.4.15"
+keywords:
+  - storage
+  - cloud
+  - files
+  - owncloud
+  - ocis
+  - udrive
+home: https://github.com/unity-workspace-org
+sources:
+  - https://github.com/unity-workspace-org/udrive-server
+  - https://github.com/unity-workspace-org/udrive-web
+maintainers:
+  - name: UDrive Team
+    email: dev@unity-workspace.org
+icon: https://raw.githubusercontent.com/unity-workspace-org/udrive-web/main/packages/web-app/src/assets/logo.svg
+

@@ -1,0 +1,346 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "udrive.fullname" . }}
+  labels:
+    {{- include "udrive.labels" . | nindent 4 }}
+spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "udrive.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "udrive.selectorLabels" . | nindent 8 }}
+      {{- if .Values.vault.enabled }}
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: {{ .Values.vault.role | quote }}
+        {{- if .Values.vault.address }}
+        vault.hashicorp.com/agent-vault-addr: {{ .Values.vault.address | quote }}
+        {{- end }}
+        {{- if or .Values.vault.caConfigMap .Values.vault.caCert }}
+        vault.hashicorp.com/agent-ca-config-map: {{ default (printf "%s-vault-ca" (include "udrive.fullname" .)) .Values.vault.caConfigMap | quote }}
+        vault.hashicorp.com/agent-ca-cert: "/vault/tls/vault-ca.crt"
+        {{- end }}
+        {{- if .Values.vault.tlsSkipVerify }}
+        vault.hashicorp.com/tls-skip-verify: "true"
+        {{- end }}
+        vault.hashicorp.com/agent-run-as-user: "1000"
+        vault.hashicorp.com/agent-run-as-group: "1000"
+        vault.hashicorp.com/agent-inject-secret-udrive: {{ .Values.vault.secretPath | quote }}
+        vault.hashicorp.com/agent-inject-template-udrive: |
+          {{`{{- with secret "`}}{{ .Values.vault.secretPath }}{{`" -}}`}}
+          export IDM_ADMIN_PASSWORD="{{`{{ .Data.data.admin_password }}`}}"
+          export STORAGE_USERS_S3NG_ACCESS_KEY="{{`{{ .Data.data.s3_access_key }}`}}"
+          export STORAGE_USERS_S3NG_SECRET_KEY="{{`{{ .Data.data.s3_secret_key }}`}}"
+          {{`{{- end -}}`}}
+        vault.hashicorp.com/agent-inject-secret-minio-ca.crt: {{ .Values.vault.secretPath | quote }}
+        vault.hashicorp.com/agent-inject-template-minio-ca.crt: |
+          {{`{{- with secret "`}}{{ .Values.vault.secretPath }}{{`" -}}`}}
+          {{`{{ .Data.data.s3_ca_cert }}`}}
+          {{`{{- end -}}`}}
+      {{- end }}
+    spec:
+      hostAliases:
+        - ip: 10.1.16.200
+          hostnames:
+            - drive.unity-workspace.com
+      serviceAccountName: {{ include "udrive.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if or (and (eq .Values.storage.driver "s3ng") .Values.storage.s3.caCert) .Values.vault.enabled }}
+      initContainers:
+        - name: init-certificates
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              cp -r -L /etc/ssl/certs/* /ssl-certs/
+              if [ -f /custom-ca/ca.crt ]; then
+                cat /custom-ca/ca.crt >> /ssl-certs/ca-certificates.crt
+              fi
+          volumeMounts:
+            - name: ssl-certs
+              mountPath: /ssl-certs
+            {{- if and (eq .Values.storage.driver "s3ng") .Values.storage.s3.caCert }}
+            - name: custom-ca
+              mountPath: /custom-ca
+            {{- end }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 10"]
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              if [ -f /vault/secrets/udrive ]; then
+                echo "Loading secrets from Vault Agent..."
+                . /vault/secrets/udrive
+              fi
+              if [ -f /vault/secrets/minio-ca.crt ]; then
+                echo "Adding MinIO CA cert from Vault Agent..."
+                cat /vault/secrets/minio-ca.crt >> /etc/ssl/certs/ca-certificates.crt
+              fi
+              ocis init || true
+              exec ocis server
+          env:
+            - name: OCIS_URL
+              value: {{ .Values.udrive.url | quote }}
+            - name: OCIS_LOG_LEVEL
+              value: {{ .Values.udrive.logLevel | quote }}
+            - name: OCIS_INSECURE
+              value: {{ .Values.udrive.insecure | quote }}
+            - name: FRONTEND_UPLOAD_MAX_CHUNK_SIZE
+              value: {{ .Values.udrive.maxChunkSize | default "20971520" | quote }}
+            - name: THUMBNAILS_CS3SOURCE_INSECURE
+              value: {{ .Values.udrive.thumbnails.cs3Insecure | default "true" | quote }}
+            - name: THUMBNAILS_WEBDAVSOURCE_INSECURE
+              value: {{ .Values.udrive.thumbnails.webdavInsecure | default "true" | quote }}
+            - name: THUMBNAILS_FILESYSTEMSTORAGE_ROOT
+              value: {{ .Values.udrive.thumbnails.storageRoot | default "/var/lib/ocis/storage/users/uploads/thumbnails" | quote }}
+            - name: PROXY_CSP_CONFIG_FILE_LOCATION
+              value: "/etc/ocis/csp/csp.yaml"
+            - name: SSE_KEEPALIVE_INTERVAL
+              value: "15s"
+            - name: WEB_ASSET_CORE_PATH
+              value: "/web/dist"
+            - name: WEB_ASSET_THEMES_PATH
+              value: "/web/dist/themes"
+            {{- if not .Values.vault.enabled }}
+            - name: IDM_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "udrive.secretName" . }}
+                  key: {{ .Values.udrive.admin.passwordKey }}
+            {{- end }}
+            - name: IDM_CREATE_DEMO_USERS
+              value: {{ .Values.udrive.demoUsers | quote }}
+            - name: PROXY_ENABLE_BASIC_AUTH
+              value: {{ .Values.udrive.enableBasicAuth | quote }}
+            - name: STORAGE_USERS_DRIVER
+              value: {{ .Values.storage.driver | quote }}
+            - name: OCIS_ASYNC_UPLOADS
+              value: {{ .Values.udrive.asyncUploads | default "false" | quote }}
+            - name: STORAGE_USERS_OCIS_ASYNC_UPLOADS
+              value: {{ .Values.udrive.asyncUploads | default "false" | quote }}
+            - name: STORAGE_USERS_S3NG_ASYNC_UPLOADS
+              value: {{ .Values.udrive.asyncUploads | default "false" | quote }}
+            {{- if eq .Values.storage.driver "s3ng" }}
+            - name: STORAGE_SYSTEM_DRIVER
+              value: "ocis"
+            - name: STORAGE_USERS_S3NG_ENDPOINT
+              value: {{ .Values.storage.s3.endpoint | quote }}
+            - name: STORAGE_USERS_S3NG_REGION
+              value: {{ .Values.storage.s3.region | quote }}
+            - name: STORAGE_USERS_S3NG_BUCKET
+              value: {{ .Values.storage.s3.bucket | quote }}
+            - name: STORAGE_USERS_S3NG_INSECURE
+              value: {{ .Values.storage.s3.insecure | quote }}
+            - name: STORAGE_USERS_S3NG_PUT_OBJECT_CONCURRENT_STREAM_PARTS
+              value: "true"
+            - name: STORAGE_USERS_S3NG_PUT_OBJECT_NUM_THREADS
+              value: "16"
+            - name: STORAGE_USERS_S3NG_PUT_OBJECT_PART_SIZE
+              value: "33554432"
+            - name: STORAGE_USERS_S3NG_PUT_OBJECT_DISABLE_CONTENT_SHA256
+              value: "true"
+            {{- if not .Values.vault.enabled }}
+            - name: STORAGE_USERS_S3NG_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "udrive.s3SecretName" . }}
+                  key: {{ .Values.storage.s3.accessKeyKey }}
+            - name: STORAGE_USERS_S3NG_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "udrive.s3SecretName" . }}
+                  key: {{ .Values.storage.s3.secretKeyKey }}
+            {{- end }}
+            {{- end }}
+            {{- if or (eq .Values.auth.provider "oidc") .Values.auth.oidc.enabled }}
+            - name: WEB_OIDC_AUTHORITY
+              value: {{ .Values.auth.oidc.authority | quote }}
+            - name: WEB_OIDC_CLIENT_ID
+              value: {{ .Values.auth.oidc.clientId | quote }}
+            - name: OCIS_OIDC_CLIENT_ID
+              value: {{ .Values.auth.oidc.clientId | quote }}
+            - name: WEB_OIDC_METADATA_URL
+              value: {{ .Values.auth.oidc.metadataUrl | quote }}
+            - name: WEB_OIDC_RESPONSE_TYPE
+              value: "code"
+            - name: WEB_OIDC_SCOPE
+              value: {{ .Values.auth.oidc.scope | quote }}
+            - name: WEB_OIDC_POST_LOGOUT_REDIRECT_URI
+              value: {{ .Values.auth.oidc.postLogoutRedirectUri | quote }}
+            - name: PROXY_OIDC_REWRITE_WELLKNOWN
+              value: "true"
+            - name: PROXY_AUTOPROVISION_ACCOUNTS
+              value: {{ .Values.auth.oidc.autoProvisionAccounts | quote }}
+            - name: PROXY_ROLE_ASSIGNMENT_DRIVER
+              value: {{ .Values.auth.oidc.roleAssignmentDriver | default "default" | quote }}
+            - name: PROXY_ROLE_ASSIGNMENT_OIDC_CLAIM
+              value: {{ .Values.auth.oidc.roleClaim | default "realm_access.roles" | quote }}
+            - name: PROXY_USER_OIDC_CLAIM
+              value: {{ .Values.auth.oidc.userClaim | quote }}
+            - name: PROXY_USER_CS3_CLAIM
+              value: "username"
+            - name: OCIS_OIDC_ISSUER
+              value: {{ .Values.auth.oidc.issuer | quote }}
+            - name: IDP_DISABLED
+              value: "true"
+            {{- if .Values.idm.enabled }}
+            - name: OCIS_EXCLUDE_RUN_SERVICES
+              value: "idm,idp,nats"
+            - name: OCIS_LDAP_URI
+              value: {{ printf "ldaps://%s-idm:9235" (include "udrive.fullname" .) | quote }}
+            - name: GRAPH_LDAP_URI
+              value: {{ printf "ldaps://%s-idm:9235" (include "udrive.fullname" .) | quote }}
+            - name: OCIS_LDAP_INSECURE
+              value: "true"
+            {{- end }}
+            {{- end }}
+            {{- if .Values.collaboration.enabled }}
+            - name: COLLABORATION_APP_ADDR
+              value: {{ .Values.collaboration.appAddr | quote }}
+            - name: COLLABORATION_APP_INSECURE
+              value: {{ .Values.collaboration.insecure | quote }}
+            - name: COLLABORATION_APP_ICON
+              value: {{ .Values.collaboration.appIcon | quote }}
+            {{- end }}
+            {{- if or (and .Values.valkey .Values.valkey.enabled) .Values.redis.enabled }}
+            - name: OCIS_CACHE_STORE
+              value: "redis"
+            - name: OCIS_CACHE_STORE_NODES
+              value: {{ if (and .Values.valkey .Values.valkey.enabled) }}{{ printf "%s-valkey:6379" (include "udrive.fullname" .) | quote }}{{ else }}{{ .Values.redis.endpoint | quote }}{{ end }}
+            - name: OCIS_PERSISTENT_STORE
+              value: "redis"
+            - name: OCIS_PERSISTENT_STORE_NODES
+              value: {{ if (and .Values.valkey .Values.valkey.enabled) }}{{ printf "%s-valkey:6379" (include "udrive.fullname" .) | quote }}{{ else }}{{ .Values.redis.endpoint | quote }}{{ end }}
+            - name: STORE_STORE
+              value: "redis"
+            - name: STORE_NODES
+              value: {{ if (and .Values.valkey .Values.valkey.enabled) }}{{ printf "%s-valkey:6379" (include "udrive.fullname" .) | quote }}{{ else }}{{ .Values.redis.endpoint | quote }}{{ end }}
+            - name: CACHE_STORE
+              value: "redis"
+            - name: CACHE_NODES
+              value: {{ if (and .Values.valkey .Values.valkey.enabled) }}{{ printf "%s-valkey:6379" (include "udrive.fullname" .) | quote }}{{ else }}{{ .Values.redis.endpoint | quote }}{{ end }}
+            {{- end }}
+            - name: NATS_NATS_STORE_DIR
+              value: "/var/tmp/ocis/nats"
+            {{- if and .Values.nats .Values.nats.enabled }}
+            - name: OCIS_EVENTS_ENDPOINT
+              value: {{ printf "%s-nats:9233" (include "udrive.fullname" .) | quote }}
+            - name: MICRO_REGISTRY_ADDRESS
+              value: {{ printf "%s-nats:9233" (include "udrive.fullname" .) | quote }}
+            {{- end }}
+          ports:
+            - name: https
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: ocis-data
+              mountPath: /var/lib/ocis
+            {{- if and .Values.persistence.uploads .Values.persistence.uploads.enabled }}
+            - name: uploads-buffer
+              mountPath: /var/lib/ocis/storage/users/uploads
+            {{- end }}
+            - name: ocis-config
+              mountPath: /etc/ocis
+            - name: nats-store
+              mountPath: /var/tmp/ocis/nats
+            - name: csp-config
+              mountPath: /etc/ocis/csp
+            {{- if or (and (eq .Values.storage.driver "s3ng") .Values.storage.s3.caCert) .Values.vault.enabled }}
+            - name: ssl-certs
+              mountPath: /etc/ssl/certs
+            {{- end }}
+      volumes:
+        - name: nats-store
+          emptyDir: {}
+        - name: csp-config
+          configMap:
+            name: {{ include "udrive.fullname" . }}-csp
+        - name: ocis-data
+          {{- if .Values.persistence.data.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "udrive.fullname" . }}-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- if and .Values.persistence.uploads .Values.persistence.uploads.enabled }}
+        - name: uploads-buffer
+          {{- if eq .Values.persistence.uploads.mode "ramdisk" }}
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.persistence.uploads.sizeLimit | default "8Gi" | quote }}
+          {{- else if eq .Values.persistence.uploads.mode "local" }}
+          emptyDir:
+            sizeLimit: {{ .Values.persistence.uploads.sizeLimit | default "20Gi" | quote }}
+          {{- else if eq .Values.persistence.uploads.mode "pvc" }}
+          persistentVolumeClaim:
+            claimName: {{ include "udrive.fullname" . }}-uploads
+          {{- end }}
+        {{- end }}
+        - name: ocis-config
+          {{- if .Values.persistence.config.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "udrive.fullname" . }}-config
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- if or (and (eq .Values.storage.driver "s3ng") .Values.storage.s3.caCert) .Values.vault.enabled }}
+        - name: ssl-certs
+          emptyDir: {}
+        {{- end }}
+        {{- if and (eq .Values.storage.driver "s3ng") .Values.storage.s3.caCert }}
+        - name: custom-ca
+          secret:
+            secretName: {{ include "udrive.fullname" . }}-ca
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

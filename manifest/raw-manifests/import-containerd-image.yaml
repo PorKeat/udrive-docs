@@ -1,0 +1,43 @@
+# Pod to import container images into containerd on egress-restricted worker nodes
+# Usage:
+# 1. Export tar on node1: sudo ctr -n k8s.io images export --all-platforms /tmp/myimage.tar <IMAGE>
+# 2. Copy tar into Longhorn RWX volume via pod: kubectl cp /tmp/myimage.tar udrive/<POD>:/var/lib/ocis/myimage.tar -c udrive
+# 3. Apply this pod targeting the destination node to import the tarball.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: import-image-node
+  namespace: udrive
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: node3   # Change to target node (e.g. node2 or node3)
+  restartPolicy: Never
+  volumes:
+    - name: host-root
+      hostPath:
+        path: /
+    - name: udrive-data
+      persistentVolumeClaim:
+        claimName: udrive-data
+  containers:
+    - name: importer
+      image: docker.io/longhornio/longhorn-manager:v1.12.1
+      imagePullPolicy: IfNotPresent
+      securityContext:
+        privileged: true
+      command:
+        - /bin/sh
+        - -c
+        - |
+          echo "Copying archive to host /tmp..."
+          cp /shared/myimage.tar /host/tmp/myimage.tar
+          echo "Importing into host containerd..."
+          chroot /host /usr/local/bin/ctr --namespace k8s.io images import /tmp/myimage.tar
+          echo "Cleaning up archives..."
+          rm -f /host/tmp/myimage.tar /shared/myimage.tar
+          echo "Image import successful."
+      volumeMounts:
+        - name: host-root
+          mountPath: /host
+        - name: udrive-data
+          mountPath: /shared

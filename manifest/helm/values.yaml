@@ -1,0 +1,319 @@
+# Global settings
+global:
+  domain: drive.unity-workspace.com
+
+# Deployment replicas (used when autoscaling is disabled)
+replicaCount: 2
+
+# Horizontal Pod Autoscaler (HPA)
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 12
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+# Container image settings
+image:
+  repository: ghcr.io/unity-workspace-org/udrive
+  pullPolicy: Always
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: "v1.4.15"
+
+imagePullSecrets:
+  - name: ghcr-secret
+nameOverride: ""
+fullnameOverride: ""
+
+# ServiceAccount Configuration
+serviceAccount:
+  create: true
+  name: "udrive"
+  annotations: {}
+
+# HashiCorp Vault Agent Integration
+vault:
+  # Enable Vault Agent sidecar injection
+  enabled: true
+  # Vault server address
+  address: "https://10.1.18.8:8200"
+  # Kubernetes auth role in Vault
+  role: "udrive-role"
+  # Secret path in Vault (KV v2)
+  secretPath: "secret/data/udrive"
+  # Skip TLS certificate verification when connecting to Vault
+  tlsSkipVerify: true
+  # ConfigMap name for Vault Root CA (automatically populated if caCert is set)
+  caConfigMap: ""
+  # Vault Root CA certificate (used to verify Vault server TLS)
+  caCert: |
+    -----BEGIN CERTIFICATE-----
+    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
+    /1m9ajdXLuN16vq1qP3by32dPUbfFqfVGpcs+nE=
+    -----END CERTIFICATE-----
+
+# UDrive Core Configuration
+udrive:
+  # External URL used to access UDrive (e.g. https://drive.company.com)
+  url: "https://drive.unity-workspace.com"
+  logLevel: info
+  # Set to true only if using self-signed internal TLS certificates
+  insecure: true
+
+  # Administrator Credentials (managed via Vault when vault.enabled: true)
+  admin:
+    username: admin
+    password: ""
+    existingSecret: ""
+    passwordKey: "admin-password"
+
+  # Create demo users (einstein, marie, katherine) for testing
+  demoUsers: false
+
+  # Basic Auth support (useful for legacy WebDAV clients)
+  enableBasicAuth: true
+
+  # Asynchronous file uploads and postprocessing.
+  # When false (recommended), uploads finalize synchronously and immediately,
+  # preventing files from getting stuck in "processing" state (HTTP 425 / spinner).
+  asyncUploads: false
+
+  # Upload chunk size in bytes (20MB = 20971520, optimal for Cloudflare 100MB body limit)
+  maxChunkSize: 20971520
+
+  # Thumbnails service configuration
+  thumbnails:
+    cs3Insecure: true
+    webdavInsecure: true
+    storageRoot: "/var/lib/ocis/storage/users/uploads/thumbnails"
+
+# Authentication & OIDC Settings
+auth:
+  # "internal" uses embedded IDP/IDM. "oidc" delegates to external Keycloak/IdP.
+  provider: oidc
+
+  # External OIDC Configuration (e.g. Keycloak)
+  oidc:
+    enabled: true
+    issuer: "https://auth.unity-workspace.com/realms/unity-workspace"
+    clientId: "udrive"
+    authority: "https://auth.unity-workspace.com/realms/unity-workspace"
+    metadataUrl: "https://auth.unity-workspace.com/realms/unity-workspace/.well-known/openid-configuration"
+    scope: "openid profile email roles"
+    postLogoutRedirectUri: "https://drive.unity-workspace.com/login"
+    autoProvisionAccounts: true
+    userClaim: "preferred_username"
+    roleClaim: "realm_access.roles"
+    roleAssignmentDriver: "oidc"
+
+# Embedded IDM Service (Identity Management / LDAP)
+idm:
+  enabled: true
+  tag: "v1.2.9"
+  nodeSelector: {}
+  affinity: {}
+
+
+# Storage Backend Configuration
+storage:
+  # "ocis" (POSIX persistent volume) or "s3ng" (S3 / MinIO Object Storage)
+  driver: s3ng
+
+  # S3 Object Storage Configuration (used when driver: s3ng, sensitive keys injected from Vault)
+  s3:
+    endpoint: "https://10.1.18.7:9000"
+    region: "default"
+    bucket: "udrive"
+    insecure: true
+    accessKey: ""
+    secretKey: ""
+    existingSecret: ""
+    accessKeyKey: "access-key"
+    secretKeyKey: "secret-key"
+    caCert: ""
+
+# Valkey Distributed Cache & Lock Store (used for multi-replica HA scaling)
+valkey:
+  enabled: true
+  image:
+    repository: valkey/valkey
+    tag: "8.0-alpine"
+    pullPolicy: IfNotPresent
+  maxmemory: "800mb"
+  maxmemoryPolicy: "allkeys-lru"
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+
+# Redis Distributed Cache & Lock Store (optional alternative)
+redis:
+  enabled: false
+  endpoint: ""
+
+# Office Document Collaboration (Collabora Online / WOPI)
+collaboration:
+  enabled: false
+  appAddr: "http://collabora:9980"
+  appIcon: "collabora"
+  insecure: true
+
+# Persistent Volume Claims
+persistence:
+  # Storage volume for user files and database (/var/lib/ocis)
+  data:
+    enabled: true
+    storageClass: "longhorn"
+    accessMode: ReadWriteMany
+    size: 50Gi
+    annotations: {}
+
+  # Storage volume for configuration and encryption keys (/etc/ocis)
+  config:
+    enabled: true
+    storageClass: "longhorn"
+    accessMode: ReadWriteMany
+    size: 2Gi
+    annotations: {}
+
+  # Dedicated high-speed buffer for in-progress uploads (/var/lib/ocis/storage/users/uploads)
+  # Set to false to share in-progress chunks across all replicas via the shared Longhorn RWX PVC
+  uploads:
+    enabled: false
+    # Mode options:
+    #   "ramdisk" -> in-memory tmpfs emptyDir (~10,000 MB/s, zero disk wear)
+    #   "local"   -> node-local SSD emptyDir (~2,000 MB/s, preserves RAM)
+    #   "pvc"     -> dedicated PersistentVolumeClaim (e.g. local-path or nvme-ssd)
+    mode: "ramdisk"
+    sizeLimit: "8Gi"
+    pvc:
+      storageClass: ""
+      accessMode: ReadWriteOnce
+      size: 20Gi
+
+# Service Settings
+service:
+  type: ClusterIP
+  port: 9200
+
+# Ingress Settings
+ingress:
+  enabled: true
+  className: "traefik"
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: "web,websecure"
+  hosts:
+    - host: drive.unity-workspace.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+# Compute Resources
+resources:
+  limits:
+    cpu: 4000m
+    memory: 4096Mi
+  requests:
+    cpu: 500m
+    memory: 1024Mi
+
+# Health Check Probes
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 9200
+    scheme: HTTPS
+  initialDelaySeconds: 45
+  periodSeconds: 15
+  timeoutSeconds: 5
+  failureThreshold: 5
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: 9200
+    scheme: HTTPS
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# Pod and Container Security Contexts
+podSecurityContext:
+  fsGroup: 1000
+
+securityContext:
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+
+# Node scheduling
+nodeSelector: {}
+tolerations: []
+affinity:
+  nodeAffinity: {}
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - udrive
+          topologyKey: kubernetes.io/hostname
+
+# Shared NATS Event Broker for Multi-Replica HA
+nats:
+  enabled: true
+  tag: "v1.2.9"
+
+# Automated Kubernetes Worker Node Kernel Network Socket Tuning
+nodeTuning:
+  enabled: true
+  sysctl:
+    netCoreSomaxconn: 65535
+    netIpv4TcpMaxSynBacklog: 65535
+    netCoreRmemMax: 16777216
+    netCoreWmemMax: 16777216
+    netIpv4TcpRmem: "4096 87380 16777216"
+    netIpv4TcpWmem: "4096 65536 16777216"
+    fsFileMax: 2097152
+    fsInotifyMaxUserWatches: 524288
